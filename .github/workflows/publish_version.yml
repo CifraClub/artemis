@@ -16,7 +16,7 @@ on:
         description: "Branch base para publicar a release"
         required: false
         type: string
-        default: master
+        default: beta
 jobs:
   build:
     name: Automation to release update
@@ -33,7 +33,7 @@ jobs:
       - name: Checkout base branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.base_branch || 'master' }}
+          ref: ${{ github.event.inputs.base_branch || 'beta' }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -88,7 +88,7 @@ jobs:
 
           git add pubspec.yaml
           git commit --allow-empty -m "Increment ${{ github.event.inputs.change_type }} version to ${{ steps.new_version.outputs.new_version }}"
-          git push origin "HEAD:${{ github.event.inputs.base_branch || 'master' }}"
+          git push origin "HEAD:${{ github.event.inputs.base_branch || 'beta' }}"
           
       - name: Publish tag
         shell: bash
