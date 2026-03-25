@@ -1,0 +1,98 @@
+name: Publish Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      change_type:
+        description: "Tipo de mudança de versão"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      base_branch:
+        description: "Branch base para publicar a release"
+        required: false
+        type: string
+        default: beta
+jobs:
+  build:
+    name: Automation to release update
+    runs-on: self-hosted
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Unlock Keychain
+        run: |
+          security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain || security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" login.keychain
+
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.base_branch || 'beta' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Extract and increment version
+        id: new_version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION_LINE="$(grep '^version:' pubspec.yaml)"
+          CURRENT_VERSION="$(echo "$VERSION_LINE" | sed -E 's/^version:[[:space:]]*//')"
+
+          # Supports both "X.Y.Z" and "X.Y.Z+N" by ignoring "+N" if present.
+          BASE_VERSION="$(echo "$CURRENT_VERSION" | sed -E 's/\+.*$//')"
+
+          MAJOR="$(echo "$BASE_VERSION" | awk -F. '{print $1}')"
+          MINOR="$(echo "$BASE_VERSION" | awk -F. '{print $2}')"
+          PATCH="$(echo "$BASE_VERSION" | awk -F. '{print $3}')"
+
+          NEW_MAJOR="$MAJOR"
+          NEW_MINOR="$MINOR"
+          NEW_PATCH="$PATCH"
+
+          if [ "${{ github.event.inputs.change_type }}" = "major" ]; then
+            NEW_MAJOR="$((MAJOR + 1))"
+            NEW_MINOR="0"
+            NEW_PATCH="0"
+          elif [ "${{ github.event.inputs.change_type }}" = "minor" ]; then
+            NEW_MINOR="$((MINOR + 1))"
+            NEW_PATCH="0"
+          else
+            NEW_PATCH="$((PATCH + 1))"
+          fi
+
+          NEW_VERSION_LINE="$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
+          echo "new_version=$NEW_VERSION_LINE" >> "$GITHUB_OUTPUT"
+                
+      - name: Replace version in pubspec.yaml
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NEW_VERSION_LINE_ESCAPED="$(printf '%s\n' "${{ steps.new_version.outputs.new_version }}" | sed 's/[\&/]/\\&/g')"
+          sed -i '' "s/^version:.*/version: $NEW_VERSION_LINE_ESCAPED/" pubspec.yaml
+          echo "Updated version to ${{ steps.new_version.outputs.new_version }}"
+        
+        
+      - name: Commit version update
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git add pubspec.yaml
+          git commit --allow-empty -m "Increment ${{ github.event.inputs.change_type }} version to ${{ steps.new_version.outputs.new_version }}"
+          git push origin "HEAD:${{ github.event.inputs.base_branch || 'beta' }}"
+          
+      - name: Publish tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag -a "v${{ steps.new_version.outputs.new_version }}" -m "Version v${{ steps.new_version.outputs.new_version }}"
+          git push origin "v${{ steps.new_version.outputs.new_version }}"
